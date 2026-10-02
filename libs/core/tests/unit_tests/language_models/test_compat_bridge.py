@@ -328,6 +328,48 @@ def test_chunks_to_events_tool_call_multichunk() -> None:
     assert "finish_reason" not in _event_metadata(events[-1])
 
 
+def test_chunks_to_events_idless_parallel_tool_calls_get_distinct_ids() -> None:
+    """Id-less parallel tool calls must not collapse onto one downstream key."""
+    chunks = [
+        ChatGenerationChunk(
+            message=AIMessageChunk(
+                content="",
+                tool_call_chunks=[
+                    {
+                        "index": 0,
+                        "id": None,
+                        "name": "search",
+                        "args": '{"q": "first"}',
+                        "type": "tool_call_chunk",
+                    },
+                    {
+                        "index": 1,
+                        "id": None,
+                        "name": "search",
+                        "args": '{"q": "second"}',
+                        "type": "tool_call_chunk",
+                    },
+                ],
+            )
+        )
+    ]
+
+    events = list(chunks_to_events(iter(chunks), message_id="msg-idless"))
+    finishes = [
+        cast("ToolCall", event["content"])
+        for event in events
+        if event["event"] == "content-block-finish"
+    ]
+
+    assert len(finishes) == 2
+    assert all(tool_call["id"] for tool_call in finishes)
+    assert finishes[0]["id"] != finishes[1]["id"]
+    assert [tool_call["args"] for tool_call in finishes] == [
+        {"q": "first"},
+        {"q": "second"},
+    ]
+
+
 def test_chunks_to_events_interleaved_parallel_tool_calls() -> None:
     """Parallel tool-call chunks can interleave without losing block lifecycles."""
     events = list(
