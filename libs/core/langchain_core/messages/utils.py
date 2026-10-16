@@ -1125,6 +1125,19 @@ def merge_message_runs(
         elif isinstance(msg, ToolMessage) or not isinstance(msg, last.__class__):
             merged.extend([last, msg])
         else:
+            preserved_invalid_tool_calls = None
+            if isinstance(last, AIMessage) and isinstance(msg, AIMessage):
+                preserved_invalid_tool_calls = [
+                    *last.invalid_tool_calls,
+                    *msg.invalid_tool_calls,
+                ]
+                if preserved_invalid_tool_calls:
+                    # AIMessageChunk derives tool_calls from tool_call_chunks during
+                    # validation. Excluding invalid calls here prevents malformed
+                    # arguments from being reparsed as fabricated valid calls.
+                    last = last.model_copy(update={"invalid_tool_calls": []})
+                    msg = msg.model_copy(update={"invalid_tool_calls": []})
+
             last_chunk = _msg_to_chunk(last)
             curr_chunk = _msg_to_chunk(msg)
             if curr_chunk.response_metadata:
@@ -1136,7 +1149,12 @@ def merge_message_runs(
                 and curr_chunk.content
             ):
                 last_chunk.content += chunk_separator
-            merged.append(_chunk_to_msg(last_chunk + curr_chunk))
+            merged_message = _chunk_to_msg(last_chunk + curr_chunk)
+            if preserved_invalid_tool_calls:
+                merged_message = merged_message.model_copy(
+                    update={"invalid_tool_calls": preserved_invalid_tool_calls}
+                )
+            merged.append(merged_message)
     return merged
 
 
